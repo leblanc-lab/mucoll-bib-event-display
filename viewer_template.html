@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Muon decay display</title>
+<style>
+:root{--bg:#07080C;--fg:#ECECF2;--muted:#80869A;--panel:rgba(16,18,26,.82);--line:#2A2F40;--acc:#B3A6FF}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+#c{position:fixed;top:0;left:0;width:100vw;height:100vh;display:block;touch-action:none}
+.panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(6px)}
+#head{top:14px;left:14px;max-width:min(440px,calc(100vw - 28px))}
+#head h1{font-size:16px;margin:0 0 2px;font-weight:700}
+#head .ev{color:var(--muted)}#head .stats{margin-top:6px;color:var(--muted);font-size:13px}
+#ctl{top:14px;right:14px;width:230px}
+#ctl h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:0 0 8px;font-weight:600}
+#ctl label{display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer}
+.sw{width:22px;height:4px;border-radius:2px;display:inline-block}
+.btns{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
+button{background:#1A1E2B;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 9px;font:inherit;font-size:13px;cursor:pointer}
+button:hover{border-color:var(--muted)}button.on{border-color:var(--acc);color:var(--acc)}
+input[type=range]{width:100%;accent-color:var(--acc)}
+#time{bottom:14px;left:14px;right:14px;display:flex;gap:12px;align-items:center}
+#time .clock{min-width:190px;font-variant-numeric:tabular-nums}
+#nav{display:flex;gap:6px;margin-top:10px}
+#nav a{color:var(--fg);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:#1A1E2B;font-size:13px}
+#nav a:hover{border-color:var(--muted)}
+.small{color:var(--muted);font-size:12px;margin-top:8px}
+@media (max-width:700px){#ctl{top:auto;bottom:70px;right:14px;left:14px;width:auto}}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="head" class="panel"><h1 id="exp"></h1><div class="ev" id="ev"></div><div class="stats" id="stats"></div>
+<div id="nav"><a id="prev" href="#">← prev</a><a href="index.html">all decays</a><a id="next" href="#">next →</a></div></div>
+<div id="ctl" class="panel"><h2>Show</h2><div id="toggles"></div>
+<h2 style="margin-top:12px">View</h2><div class="btns"><button id="v3d" class="on">3D</button><button id="vside">side</button><button id="vtop">top</button><button id="vend">end</button><button id="vip">IP</button><button id="vrot">spin</button></div>
+<h2 style="margin-top:12px">Transverse stretch <span id="sval"></span></h2><input type="range" id="stretch" min="1" max="80" step="1">
+<div class="small">drag to rotate · scroll to zoom · right-drag to pan</div></div>
+<div id="time" class="panel"><button id="play">▶ play</button><input type="range" id="tsl" min="0" max="1000" value="1000"><div class="clock" id="clock"></div><button id="rec" title="Plays the animation from the start in the current view and saves it as a video file">● record video</button><button id="png" title="Saves the current view as an image">image</button></div>
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
+<script>
+const D=/*DATA*/;
+function f32(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return new Float32Array(u.buffer);}
+document.getElementById('exp').textContent=D.experiment;
+document.getElementById('ev').textContent=`One muon decay at z = ${D.zd.toFixed(1)} m`;
+document.title=`Muon decay at z = ${D.zd.toFixed(1)} m`;
+document.getElementById('stats').textContent=`${D.nsteps.toLocaleString()} FLUKA steps, ${D.nshown.toLocaleString()} drawn · ${D.nent} particles enter the detector region`;
+for(const k of ['prev','next']){const a=document.getElementById(k);if(D[k])a.href=D[k];else a.style.visibility='hidden';}
+const canvas=document.getElementById('c');
+const R=new THREE.WebGLRenderer({canvas,antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setClearColor(0x07080C);
+const scene=new THREE.Scene();
+const L=D.zhi-D.zlo, zmid=(D.zhi+D.zlo)/2;
+const cam=new THREE.PerspectiveCamera(35,1,1,L*40);
+const ctl=new THREE.OrbitControls(cam,canvas);ctl.enableDamping=true;ctl.dampingFactor=.08;ctl.autoRotateSpeed=.8;ctl.screenSpacePanning=true;ctl.zoomSpeed=.9;
+// Scene axes (cm): X = z (beam), Y = y (up), Z = -x. Transverse directions are stretched by the slider.
+const world=new THREE.Group();scene.add(world);
+const toggles=document.getElementById('toggles');
+const legend=[];
+function addToggle(name,color,obj,on,short){legend.push({name:short||name,color,obj});const l=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.checked=on;
+  const sw=document.createElement('span');sw.className='sw';sw.style.background=color;l.append(cb,sw,document.createTextNode(name));toggles.append(l);
+  obj.visible=on;cb.onchange=()=>{obj.visible=cb.checked;};}
+const umax={value:1};
+const VS='attribute float u;varying float vU;void main(){vU=u;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
+const FS='uniform vec3 col;uniform float umax;uniform float op;varying float vU;void main(){if(vU>umax)discard;float f=smoothstep(umax-0.025,umax,vU)*step(umax,0.999);gl_FragColor=vec4(mix(col,vec3(1.0),0.6*f),op+(1.0-op)*f);}';
+for(const g of D.groups){if(!g.n)continue;
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(f32(g.pos),3));geo.setAttribute('u',new THREE.BufferAttribute(f32(g.u),1));
+  const mat=new THREE.ShaderMaterial({vertexShader:VS,fragmentShader:FS,uniforms:{col:{value:new THREE.Color(g.color)},umax:umax,op:{value:g.opacity}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
+  const ls=new THREE.LineSegments(geo,mat);ls.frustumCulled=false;world.add(ls);addToggle(`${g.name} (${g.n.toLocaleString()} steps)`,g.color,ls,true,g.name);}
+if(D.entries.n){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(f32(D.entries.pos),3));
+  const pts=new THREE.Points(geo,new THREE.PointsMaterial({color:0xFFFFFF,size:3,sizeAttenuation:false}));pts.frustumCulled=false;world.add(pts);addToggle('entries to detector region','#FFFFFF',pts,false);}
+for(const w of D.wire){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(f32(w.pos),3));
+  const ls=new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:w.color,transparent:true,opacity:w.opacity}));ls.frustumCulled=false;world.add(ls);addToggle(w.name,w.color,ls,true);}
+// time: slider position u in [0,1]; linear in time until the shower front has passed the IP (u = 0.6), logarithmic after
+function tOf(u){return u<0.6?u/0.6*D.tfront:D.tfront*Math.pow(D.tend/D.tfront,(u-0.6)/0.4);}
+function fmt(t){return t<1000?`${t.toFixed(0)} ns after the decay`:`${(t/1000).toPrecision(3)} µs after the decay`;}
+const tsl=document.getElementById('tsl'),clock=document.getElementById('clock'),play=document.getElementById('play');
+function setU(u){umax.value=u;tsl.value=Math.round(u*1000);clock.textContent=u>=0.999?'all steps':fmt(tOf(u));}
+tsl.oninput=()=>{playing=false;play.textContent='▶ play';setU(tsl.value/1000);};
+let playing=false,t0=0,rec=null,recEnd=0,rcv=null,rctx=null;play.onclick=()=>{playing=!playing;play.textContent=playing?'❚❚ pause':'▶ play';if(playing){if(umax.value>=0.999)setU(0);t0=performance.now()-umax.value*14000;}};
+// transverse stretch
+const st=document.getElementById('stretch'),sval=document.getElementById('sval');
+function setS(s){world.scale.set(1,s,s);sval.textContent=`× ${s}`;st.value=s;}
+st.oninput=()=>setS(+st.value);setS(Math.max(1,Math.min(80,Math.round(L/(4.2*2*D.rmax)))));
+// views
+const btn=id=>document.getElementById(id);const vb=['v3d','vside','vtop','vend','vip'];
+function view(id,pos,target){vb.forEach(b=>btn(b).classList.toggle('on',b===id));ctl.target.set(...target);cam.position.set(...pos);cam.up.set(0,1,0);ctl.update();}
+const T=[zmid,0,0];
+btn('v3d').onclick=()=>view('v3d',[zmid-0.35*L,0.45*L,0.95*L],T);
+btn('vside').onclick=()=>view('vside',[zmid,0,1.6*L],T);
+btn('vtop').onclick=()=>view('vtop',[zmid,1.6*L,0.001*L],T);
+btn('vend').onclick=()=>view('vend',[D.zhi+0.6*L,0,0.001*L],T);
+btn('vip').onclick=()=>{setS(1);view('vip',[-900,700,1900],[0,0,0]);};
+btn('vrot').onclick=()=>{ctl.autoRotate=!ctl.autoRotate;btn('vrot').classList.toggle('on',ctl.autoRotate);};
+btn('v3d').onclick();setU(1);
+// video and image export: the 3D canvas plus the labels, drawn onto a 2D canvas
+function compose(cv,cx){const k=cv.height/innerHeight,pad=20*k;cx.drawImage(canvas,0,0,cv.width,cv.height);cx.textBaseline='top';cx.fillStyle='#ECECF2';
+  cx.textAlign='left';cx.font=`700 ${17*k}px system-ui,sans-serif`;cx.fillText(D.experiment,pad,pad);
+  cx.font=`${14*k}px system-ui,sans-serif`;cx.fillStyle='#B8BCC8';cx.fillText(document.getElementById('ev').textContent,pad,pad+24*k);cx.fillText(clock.textContent,pad,pad+44*k);
+  let y=pad;cx.textAlign='right';for(const it of legend){if(!it.obj.visible)continue;cx.fillStyle=it.color;cx.fillRect(cv.width-pad-22*k,y+7*k,22*k,4*k);cx.fillStyle='#ECECF2';cx.fillText(it.name,cv.width-pad-30*k,y);y+=20*k;}}
+function newCanvas(){const cv=document.createElement('canvas');cv.width=canvas.width;cv.height=canvas.height;return cv;}
+function save(blob,ext){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`muon_decay_z${D.zd.toFixed(0)}m.${ext}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);}
+const recBtn=document.getElementById('rec');
+function pickMime(){if(!window.MediaRecorder)return null;for(const m of ['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'])if(MediaRecorder.isTypeSupported(m))return m;return null;}
+recBtn.onclick=()=>{if(rec){rec.stop();return;}
+  const mime=pickMime();if(!mime){alert('This browser cannot record video.');return;}
+  rcv=newCanvas();rctx=rcv.getContext('2d');const chunks=[];
+  rec=new MediaRecorder(rcv.captureStream(30),{mimeType:mime,videoBitsPerSecond:12e6});
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+  rec.onstop=()=>{save(new Blob(chunks,{type:mime.split(';')[0]}),mime.startsWith('video/mp4')?'mp4':'webm');rec=null;recEnd=0;recBtn.textContent='● record video';recBtn.classList.remove('on');};
+  setU(0);playing=true;play.textContent='❚❚ pause';t0=performance.now()+400;rec.start();recBtn.textContent='■ stop';recBtn.classList.add('on');};
+document.getElementById('png').onclick=()=>{R.render(scene,cam);const cv=newCanvas();compose(cv,cv.getContext('2d'));cv.toBlob(b=>save(b,'png'),'image/png');};
+function resize(){const w=innerWidth,h=innerHeight;R.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();}
+addEventListener('resize',resize);resize();
+(function loop(now){requestAnimationFrame(loop);if(playing){const u=(now-t0)/14000;if(u>=1){setU(1);playing=false;play.textContent='▶ play';if(rec&&!recEnd)recEnd=now+1500;}else setU(Math.max(0,u));}
+  ctl.update();R.render(scene,cam);if(rec){compose(rcv,rctx);if(recEnd&&now>recEnd){recEnd=0;rec.stop();}}})(performance.now());
+</script></body></html>

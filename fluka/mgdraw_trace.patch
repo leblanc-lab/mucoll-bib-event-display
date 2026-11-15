@@ -1,0 +1,23 @@
+--- mgdraw_in_noz_area.f
++++ mgdraw_in_noz_area.f
+@@ -80,6 +80,20 @@
+          SCOORD = 0D+0
+          OPEN ( UNIT = IODRAW, FILE = 'DET_IP.dat', STATUS = 'REPLACE',
+      &          FORM ='UNFORMATTED', ACCESS="STREAM" )
++         OPEN ( UNIT = 71, FILE = 'TRACKS.dat', STATUS = 'REPLACE',
++     &          FORM ='UNFORMATTED', ACCESS="STREAM" )
++      END IF
++*     Trace version: write every track segment (36 bytes each):
++*     particle id, kinetic energy [GeV], age since the decay at the
++*     end of the step [s], start and end point [cm]
++      IF ( JTRACK .GE. -6 .AND. NTRACK .GT. 0 ) THEN
++         DO 100 ISEG = 1, NTRACK
++            WRITE (71) JTRACK, REAL ( ETRACK - AM (JTRACK) ),
++     &         REAL ( ATRACK ),
++     &         REAL ( XTRACK (ISEG-1) ), REAL ( YTRACK (ISEG-1) ),
++     &         REAL ( ZTRACK (ISEG-1) ), REAL ( XTRACK (ISEG) ),
++     &         REAL ( YTRACK (ISEG) ), REAL ( ZTRACK (ISEG) )
++ 100     CONTINUE
+       END IF
+ *
+ *  |  End of quenching
