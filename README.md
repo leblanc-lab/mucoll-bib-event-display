@@ -15,8 +15,10 @@ There are two kinds of display:
   movies of the shower building up in time.
 - **Interactive 3D pages** (`make_viewer.py`): self-contained HTML pages with a time
   slider, species and geometry toggles, preset views, and buttons to save an image or
-  record the animation as a video. Pages for six decays are in `docs/`: open
-  `docs/index.html` in a browser.
+  record the animation as a video. Pages for six decays are online at
+  https://leblanc-lab.github.io/mucoll-bib-event-display/ and in `docs/` (open
+  `docs/index.html` in a browser). The site is served from the `gh-pages` branch,
+  which holds a copy of `docs/`.
 
 ## What the displays show
 
